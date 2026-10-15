@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MOSIP Face Liveness & PAD - Active Challenge Verification</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <header class="header">
+        <div class="header-titles">
+          <h1>MOSIP Face Liveness & PAD</h1>
+          <p class="subtitle">Phase 2: Temporal Action Detectors & Dynamic Challenge Verification</p>
+        </div>
+        <div class="header-badges">
+          <span class="badge badge-iso">ISO/IEC 30107 Aligned</span>
+          <span class="badge badge-mosip">MOSIP 1.2 Compliant L0</span>
+        </div>
+      </header>
+
+      <main class="main-layout">
+        <!-- Video Stream Viewport & Active Challenge Prompts -->
+        <section class="camera-viewport-card">
+          <div class="viewport-wrapper">
+            <video id="webcamVideo" autoplay playsinline muted></video>
+            <canvas id="overlayCanvas"></canvas>
+
+            <!-- Status banner overlay -->
+            <div id="statusBanner" class="status-banner">
+              <span class="indicator-dot dot-idle" id="statusDot"></span>
+              <span id="statusText">Camera Idle. Click "Start Camera" to initialize.</span>
+            </div>
+
+            <!-- Dynamic Active Challenge HUD Overlay -->
+            <div id="challengeHud" class="challenge-hud hidden">
+              <div class="challenge-step-badge" id="challengeStepBadge">Challenge 1 of 2</div>
+              <div class="challenge-prompt-text" id="challengePromptText">Please blink naturally</div>
+              <div class="challenge-progress-bar-container">
+                <div class="challenge-progress-bar" id="challengeProgressBar"></div>
+              </div>
+              <div class="challenge-subtext" id="challengeSubtext">Awaiting facial action...</div>
+            </div>
+
+            <!-- Face Presence Alert -->
+            <div id="presenceAlert" class="presence-alert hidden"></div>
+          </div>
+
+          <!-- Controls toolbar -->
+          <div class="controls-toolbar">
+            <button id="btnStart" class="btn btn-primary">Start Camera</button>
+            <button id="btnStop" class="btn btn-danger" disabled>Stop Camera</button>
+            <button id="btnStartChallenge" class="btn btn-accent" disabled>Start Active Verification</button>
+            <label class="toggle-control">
+              <input type="checkbox" id="chkLandmarks" checked />
+              <span>Show Landmarks</span>
+            </label>
+            <label class="toggle-control">
+              <input type="checkbox" id="chkBbox" checked />
+              <span>Show Bounding Box</span>
+            </label>
+            <span class="fps-counter" id="fpsDisplay">FPS: --</span>
+          </div>
+
+          <!-- Error Alert Banner -->
+          <div id="errorBanner" class="error-banner hidden">
+            <strong id="errorTitle">Camera Error</strong>:
+            <span id="errorMessage"></span>
+          </div>
+
+          <!-- Challenge Result Banner -->
+          <div id="sessionResultBanner" class="session-result-banner hidden"></div>
+        </section>
+
+        <!-- Real-Time Metrics & Diagnostics Sidebar -->
+        <aside class="metrics-sidebar">
+          <div class="metric-card">
+            <h3>Active Verification State</h3>
+            <div class="presence-indicator" id="challengeStateBadge">STANDBY</div>
+            <div class="challenge-meta-row">
+              <span>Attempt: <strong id="valAttempt">--</strong></span>
+              <span>Remaining: <strong id="valTimer">-- s</strong></span>
+            </div>
+            <p class="metric-hint" id="valActionFeedback">Action detector ready.</p>
+          </div>
+
+          <div class="metric-card">
+            <h3>Face Presence Status</h3>
+            <div class="presence-indicator" id="presenceStatusBadge">NO_FACE</div>
+            <p class="metric-hint">Rules: Exactly 1 face required. 0 or >1 faces reject capture.</p>
+          </div>
+
+          <div class="metric-card">
+            <h3>Landmark Telemetry</h3>
+            <div class="telemetry-grid">
+              <div class="telemetry-item">
+                <span class="label">Eye Openness (EAR):</span>
+                <span class="value" id="valEar">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Blink State:</span>
+                <span class="value" id="valBlink">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Mouth Openness (MAR):</span>
+                <span class="value" id="valMar">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Smile Metric:</span>
+                <span class="value" id="valSmile">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Head Yaw (L/R):</span>
+                <span class="value" id="valYaw">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Head Pitch (U/D):</span>
+                <span class="value" id="valPitch">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Head Roll:</span>
+                <span class="value" id="valRoll">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Latency:</span>
+                <span class="value" id="valLatency">-- ms</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <h3>Quality & Positioning</h3>
+            <div class="telemetry-grid">
+              <div class="telemetry-item">
+                <span class="label">Centered:</span>
+                <span class="value" id="valCentered">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Coverage Ratio:</span>
+                <span class="value" id="valCoverage">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Brightness Luma:</span>
+                <span class="value" id="valBrightness">--</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="label">Lighting Adequate:</span>
+                <span class="value" id="valLighting">--</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="metric-card note-card">
+            <h4>Technical Boundary Note</h4>
+            <p>
+              Temporal facial action detection confirms live responsiveness to dynamic prompts, but <strong>does not alone replace full presentation attack defense (PAD)</strong>. Physical presentation attack models (screens, cutouts, silicone masks) operate as complementary safeguards.
+            </p>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./src/app.ts"></script>
+  </body>
+</html>
