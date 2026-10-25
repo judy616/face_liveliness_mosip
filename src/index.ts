@@ -28,9 +28,9 @@ async function main() {
     await device.disconnect();
   });
 
-  // Scenario 2: Operator Authentication needing Active Challenge (e.g. Blink / Turn Head)
+  // Scenario 2: Operator Authentication needing Active Challenge
   await runScenario('2. Operator Authentication - Passive Fallback to Active Challenge', async () => {
-    // Threshold for operator is 0.90; initial frame gives 0.88, triggering challenge
+    // Threshold for operator is 0.90; mock score is 0.88, so an active challenge is triggered
     const device = new MockBiometricDevice('CAM-002', 'L0-Desktop-Cam', 'L0', {
       isLiveHuman: true,
       passiveQualityScore: 0.88,
@@ -38,14 +38,25 @@ async function main() {
     });
     await device.connect();
 
-    // After 800ms, user responds by turning head / blinking
-    setTimeout(() => {
-      console.log('-> [User Simulation] Performing requested action: BLINK...');
-      device.setSimulationOptions({ simulatedAction: 'BLINK' });
+    // The challenge is random, so the simulated user cycles through every action.
+    // Each action is held for 400 ms (about 4 frames), so whichever one is requested gets satisfied.
+    const actions = ['BLINK', 'SMILE', 'TURN_HEAD_LEFT', 'TURN_HEAD_RIGHT'] as const;
+    let i = 0;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const startTimeout = setTimeout(() => {
+      timer = setInterval(() => {
+        const action = actions[i % actions.length]!;
+        device.setSimulationOptions({ simulatedAction: action });
+        i++;
+      }, 400);
     }, 800);
 
     const controller = new FaceLivenessWorkflowController(WORKFLOW_CONFIGS.OPERATOR);
     const result = await controller.runWorkflow(device);
+
+    clearTimeout(startTimeout);
+    if (timer) clearInterval(timer);
+
     console.log(`Result: ${result.status} | Success: ${result.success}`);
     await device.disconnect();
   });
@@ -59,7 +70,9 @@ async function main() {
 
     const controller = new FaceLivenessWorkflowController(WORKFLOW_CONFIGS.SUPERVISOR);
     const result = await controller.runWorkflow(device);
-    console.log(`Result: ${result.status} | Success: ${result.success} | Attack: ${result.padResult?.attackType}`);
+    console.log(
+      `Result: ${result.status} | Success: ${result.success} | Attack: ${result.padResult?.attackType}`
+    );
     await device.disconnect();
   });
 }

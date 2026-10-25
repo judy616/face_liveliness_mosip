@@ -63,9 +63,9 @@ const cameraSource = new BrowserCameraSource({
 const detector = new MediaPipeFaceLandmarkDetector();
 const controller = new RealtimeFaceAcquisitionController(cameraSource, detector);
 
-// Active Challenge Session Controller (Resident Policy: 2 sequential challenges)
+// Active Challenge Session Controller — challenge count driven by config
 const challengeController = new DynamicChallengeSessionController(WORKFLOW_CONFIGS.RESIDENT, {
-  minChallengesRequired: 2,
+  minChallengesRequired: WORKFLOW_CONFIGS.RESIDENT.minChallengesRequired,
 });
 
 function setStatus(text: string, type: 'idle' | 'active' | 'warning' | 'error') {

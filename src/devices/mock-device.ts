@@ -1,22 +1,7 @@
 import { VideoFrame, BiometricDeviceLevel } from '../types/index.js';
+import { BiometricDevice, FrameCallback } from './device-interface.js';
 
-export type FrameCallback = (frame: VideoFrame) => void;
-
-/**
- * Common Face Capture Device Interface compliant with MOSIP Device Provider APIs.
- * Supports L0 (untrusted capture) and L1 (cryptographically signed/secure hardware).
- */
-export interface BiometricDevice {
-  readonly deviceId: string;
-  readonly deviceModel: string;
-  readonly level: BiometricDeviceLevel;
-  readonly isConnected: boolean;
-
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  startStream(onFrame: FrameCallback): Promise<void>;
-  stopStream(): Promise<void>;
-}
+export type { FrameCallback };
 
 export interface FrameSimulatorOptions {
   isAttack?: boolean;
@@ -29,13 +14,17 @@ export interface FrameSimulatorOptions {
 /**
  * Mock L0/L1 device for automated testing & development simulation.
  * Satisfies Bonus Task #1 in MOSIP Decode 04 requirements.
+ *
+ * This device supplies synthetic padLiveScore values for unit-testing the
+ * liveness engine without needing a real camera or ONNX model.
+ * It is NOT a substitute for a real PAD model in production.
  */
 export class MockBiometricDevice implements BiometricDevice {
   public readonly deviceId: string;
   public readonly deviceModel: string;
   public readonly level: BiometricDeviceLevel;
   private _connected: boolean = false;
-  private intervalHandle: NodeJS.Timeout | null = null;
+  private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private frameCounter: number = 0;
   private simOptions: FrameSimulatorOptions;
 
@@ -81,11 +70,16 @@ export class MockBiometricDevice implements BiometricDevice {
         timestamp: Date.now(),
         width: 640,
         height: 480,
-        data: new Uint8Array(640 * 480 * 3), // dummy raw RGB buffer
+        data: new Uint8Array(0), // raw frame memory not stored in mock
         metadata: {
           isPhotoPaperTexture: this.simOptions.attackType === 'PRINTED_PHOTO',
           isScreenPixelGrid: this.simOptions.attackType === 'DIGITAL_DISPLAY_SCREEN',
           isVideoReplayArtifacts: this.simOptions.attackType === 'VIDEO_REPLAY',
+          // Synthetic PAD score: attacks get 0.05 (spoof), live humans get passiveQualityScore
+          padLiveScore: this.simOptions.attackType
+            ? 0.05
+            : (this.simOptions.passiveQualityScore ?? 0.95),
+          padModelVersion: 'MockPAD-1.0',
           eyeBlinkRate: this.simOptions.simulatedAction === 'BLINK' ? 0.92 : 0.05,
           smileConfidence: this.simOptions.simulatedAction === 'SMILE' ? 0.95 : 0.1,
           headAngleYaw:

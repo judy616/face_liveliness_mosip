@@ -18,6 +18,8 @@ export interface VideoFrame {
     readonly isPhotoPaperTexture?: boolean;
     readonly isScreenPixelGrid?: boolean;
     readonly isVideoReplayArtifacts?: boolean;
+    readonly padLiveScore?: number;
+    readonly padModelVersion?: string;
     readonly eyeBlinkRate?: number;
     readonly smileConfidence?: number;
     readonly headAngleYaw?: number; // negative = left, positive = right
@@ -29,7 +31,8 @@ export type PresentationAttackType =
   | 'PRINTED_PHOTO'
   | 'DIGITAL_DISPLAY_SCREEN'
   | 'VIDEO_REPLAY'
-  | '3D_MASK';
+  | '3D_MASK'
+  | 'UNKNOWN_SPOOF';
 
 export interface PadAssessmentResult {
   readonly isAttackDetected: boolean;
@@ -70,6 +73,8 @@ export interface WorkflowConfig {
   readonly challengeTimeoutMs: number;
   readonly maxRetries: number;
   readonly challengePool: readonly ChallengeType[];
+  /** Minimum number of sequential challenges required for active verification. */
+  readonly minChallengesRequired: number;
 }
 
 // ============================================================================

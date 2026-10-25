@@ -7,8 +7,9 @@ import {
 } from '../types/index.js';
 
 /**
- * Presentation Attack Detection (PAD) conforming to ISO/IEC 30107
+ * Presentation Attack Detection (PAD), modelled on the attack categories in ISO/IEC 30107.
  * Evaluates spoofs: printed photos, screens/monitors, and video replays.
+ * Note: formal conformance requires independent testing; this comment is not a claim of compliance.
  */
 export class PresentationAttackDetector {
   public evaluate(frame: VideoFrame): PadAssessmentResult {
@@ -22,7 +23,7 @@ export class PresentationAttackDetector {
         isAttackDetected: true,
         attackType: 'PRINTED_PHOTO',
         attackConfidence: 0.98,
-        details: 'High specular reflection & paper halftone pattern detected (ISO 30107)',
+        details: 'High specular reflection & paper halftone pattern detected',
       };
     }
 
@@ -40,7 +41,18 @@ export class PresentationAttackDetector {
         isAttackDetected: true,
         attackType: 'VIDEO_REPLAY',
         attackConfidence: 0.93,
-        details: 'Inter-frame compression compression artifacts & frame jitter detected',
+        details: 'Inter-frame compression artifacts & frame jitter detected',
+      };
+    }
+
+    // Image-based PAD model score (0 = spoof, 1 = live)
+    const s = meta.padLiveScore;
+    if (s !== undefined && s < 0.5) {
+      return {
+        isAttackDetected: true,
+        attackType: 'UNKNOWN_SPOOF',
+        attackConfidence: 1 - s,
+        details: 'Image-based PAD model scored frame as spoof',
       };
     }
 
@@ -54,7 +66,7 @@ export class PresentationAttackDetector {
 
 /**
  * Passive Liveness Analyzer
- * Checks depth, micromovements, and skin texture without requiring user interaction.
+ * Uses the image-based PAD score; fails closed when no score is available.
  */
 export class PassiveLivenessAnalyzer {
   private padDetector: PresentationAttackDetector;
@@ -75,8 +87,12 @@ export class PassiveLivenessAnalyzer {
       };
     }
 
-    // Default simulated score based on natural variance
-    const score = 0.88; 
+    const score = frame.metadata?.padLiveScore;
+    if (score === undefined) {
+      // Fail closed: no PAD score means we cannot call this frame live
+      return { livenessScore: 0, padResult, meetsThreshold: false };
+    }
+
     return {
       livenessScore: score,
       padResult,

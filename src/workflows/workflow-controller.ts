@@ -10,7 +10,7 @@ import {
   ActiveChallengeEngine,
   PresentationAttackDetector,
 } from '../engine/liveness-engine.js';
-import { BiometricDevice } from '../devices/mock-device.js';
+import { BiometricDevice } from '../devices/device-interface.js';
 
 export interface WorkflowResult {
   readonly success: boolean;
@@ -20,6 +20,9 @@ export interface WorkflowResult {
   readonly finalFrame?: VideoFrame;
   readonly padResult?: PadAssessmentResult;
 }
+
+/** Max frames to wait for the PAD model to produce its first score */
+const MAX_FRAMES_WAITING_FOR_PAD_SCORE = 60;
 
 /**
  * Orchestrates the Hybrid Passive -> Active Face Capture Workflow
@@ -78,15 +81,23 @@ export class FaceLivenessWorkflowController {
       let activeChallenge: ActiveChallenge | null = null;
       let challengeStartTime = 0;
       let frameReceivedCount = 0;
+      let settled = false;
+
+      const finish = (res: Omit<WorkflowResult, 'attempts'>) => {
+        if (settled) return;
+        settled = true;
+        device.stopStream();
+        resolve(res);
+      };
 
       const onFrame = (frame: VideoFrame) => {
+        if (settled) return;
         frameReceivedCount++;
 
-        // 1. Presentation Attack Detection on every frame (ISO 30107)
+        // 1. Presentation Attack Detection on every frame
         const padResult = this.padDetector.evaluate(frame);
         if (padResult.isAttackDetected) {
-          device.stopStream();
-          resolve({
+          finish({
             success: false,
             status: 'FAILED_PAD_ATTACK',
             message: `Presentation Attack Detected: ${padResult.attackType} (${padResult.details})`,
@@ -95,8 +106,22 @@ export class FaceLivenessWorkflowController {
           return;
         }
 
+        const hasPadScore = frame.metadata?.padLiveScore !== undefined;
+
         // 2. Initial Passive Liveness Phase
         if (currentStatus === 'CHECKING_PASSIVE') {
+          // Wait for the PAD model to produce its first score (fail closed if it never does)
+          if (!hasPadScore) {
+            if (frameReceivedCount >= MAX_FRAMES_WAITING_FOR_PAD_SCORE) {
+              finish({
+                success: false,
+                status: 'CHECKING_PASSIVE',
+                message: 'No PAD score available (model not loaded or no face); cannot verify liveness',
+              });
+            }
+            return;
+          }
+
           // Accumulate a few frames for passive analysis
           if (frameReceivedCount >= 3) {
             const passiveRes = this.passiveAnalyzer.analyzeFrame(
@@ -107,33 +132,30 @@ export class FaceLivenessWorkflowController {
             console.log(`[PASSIVE EVALUATION] Score: ${passiveRes.livenessScore.toFixed(2)} | Target: ${this.config.passiveConfidenceThreshold}`);
 
             if (passiveRes.meetsThreshold) {
-              device.stopStream();
               console.log(`[SUCCESS] Passive threshold met! Face capture complete.`);
-              resolve({
+              finish({
                 success: true,
                 status: 'VERIFIED_SUCCESS',
                 message: 'Passive face liveness verified successfully.',
                 finalFrame: frame,
               });
               return;
+            }
+
+            // Passive threshold not met: transition to Active Challenge
+            if (this.config.activeLivenessEnabled) {
+              currentStatus = 'ACTIVE_CHALLENGE_IN_PROGRESS';
+              activeChallenge = this.challengeEngine.generateRandomChallenge(
+                this.config.challengeTimeoutMs
+              );
+              challengeStartTime = Date.now();
+              console.log(`[ACTIVE CHALLENGE PROMPT] >>> ${activeChallenge.promptMessage} <<<`);
             } else {
-              // Passive threshold not met: transition to Active Challenge
-              if (this.config.activeLivenessEnabled) {
-                currentStatus = 'ACTIVE_CHALLENGE_IN_PROGRESS';
-                activeChallenge = this.challengeEngine.generateRandomChallenge(
-                  this.config.challengeTimeoutMs
-                );
-                challengeStartTime = Date.now();
-                console.log(`[ACTIVE CHALLENGE PROMPT] >>> ${activeChallenge.promptMessage} <<<`);
-              } else {
-                device.stopStream();
-                resolve({
-                  success: false,
-                  status: 'CHECKING_PASSIVE',
-                  message: 'Passive liveness score below threshold and active challenges disabled.',
-                });
-                return;
-              }
+              finish({
+                success: false,
+                status: 'CHECKING_PASSIVE',
+                message: 'Passive liveness score below threshold and active challenges disabled.',
+              });
             }
           }
           return;
@@ -144,9 +166,8 @@ export class FaceLivenessWorkflowController {
           const elapsed = Date.now() - challengeStartTime;
 
           if (elapsed > activeChallenge.timeoutMs) {
-            device.stopStream();
             console.warn(`[TIMEOUT] Challenge "${activeChallenge.promptMessage}" timed out.`);
-            resolve({
+            finish({
               success: false,
               status: 'FAILED_TIMEOUT',
               message: `Active challenge timed out after ${activeChallenge.timeoutMs}ms`,
@@ -154,23 +175,23 @@ export class FaceLivenessWorkflowController {
             return;
           }
 
-          const actionValidated = this.challengeEngine.validateAction(activeChallenge, frame);
+          // The challenge only counts if the PAD model also has a score for this frame
+          const actionValidated =
+            hasPadScore && this.challengeEngine.validateAction(activeChallenge, frame);
           if (actionValidated) {
-            device.stopStream();
             console.log(`[SUCCESS] Facial action "${activeChallenge.type}" detected and verified!`);
-            resolve({
+            finish({
               success: true,
               status: 'VERIFIED_SUCCESS',
               message: `Active challenge "${activeChallenge.promptMessage}" satisfied.`,
               finalFrame: frame,
             });
-            return;
           }
         }
       };
 
       device.startStream(onFrame).catch((err) => {
-        resolve({
+        finish({
           success: false,
           status: 'IDLE',
           message: `Device streaming error: ${err.message}`,
